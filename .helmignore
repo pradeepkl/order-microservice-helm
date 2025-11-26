@@ -21,3 +21,11 @@
 .idea/
 *.tmproj
 .vscode/
+# CI/CD files (add these)
+.github/
+.gitlab-ci.yml
+*.yml
+!Chart.yaml
+!values.yaml
+# Exclude helm ignore itself
+.helmignore
