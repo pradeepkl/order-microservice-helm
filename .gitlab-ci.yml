@@ -1,0 +1,86 @@
+# -----------------------------------------------------
+# GitLab CI/CD → Package & Push Helm Chart to Azure ACR (OIDC)
+# -----------------------------------------------------
+
+stages:
+  - lint
+  - build-helm
+  - push-helm
+
+variables:
+  ACR_LOGIN_SERVER: "$AZURE_CONTAINER_REGISTRY"   # e.g. myregistry.azurecr.io
+  HELM_REGISTRY: "oci://${ACR_LOGIN_SERVER}/helm"
+
+# -----------------------------------------------------
+# Lint Helm Chart
+# -----------------------------------------------------
+lint:
+  stage: lint
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  script:
+    - echo "Running helm lint..."
+    - helm lint .
+  only:
+    - main
+    - master
+
+# -----------------------------------------------------
+# Build Helm Chart
+# -----------------------------------------------------
+build-helm:
+  stage: build-helm
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  script:
+    - echo "Packaging Helm chart..."
+    - helm package . --version 0.1.${CI_PIPELINE_IID} --app-version $CI_COMMIT_SHORT_SHA
+    - ls -lh *.tgz
+    # Copy helm binary to artifacts for reuse in push stage
+    - cp $(which helm) ./helm-binary
+  artifacts:
+    paths:
+      - "*.tgz"
+      - helm-binary
+    expire_in: 1 hour
+  only:
+    - main
+    - master
+
+# -----------------------------------------------------
+# Push Helm Chart to Azure ACR (via OIDC) 
+# -----------------------------------------------------
+push-helm:
+  stage: push-helm
+  image:
+    name: mcr.microsoft.com/azure-cli:latest
+    entrypoint: [""]
+  dependencies:
+    - build-helm
+  id_tokens:
+    ID_TOKEN:
+      aud: "api://AzureADTokenExchange"
+  before_script:
+    # Use Helm binary from build-helm artifacts
+    - mv helm-binary /usr/local/bin/helm
+    - chmod +x /usr/local/bin/helm
+    - helm version
+    
+    # Azure OIDC login
+    - az login --service-principal -u "$AZURE_CLIENT_ID" --tenant "$AZURE_TENANT_ID" --federated-token "$ID_TOKEN"
+  script:
+    - echo "Pushing Helm chart to ACR..."
+    - ls -lh *.tgz
+    # Get the actual chart package name
+    - export CHART_PACKAGE=$(ls *.tgz)
+    - echo "Chart package $CHART_PACKAGE"
+    # Get ACR token and login with Helm
+    - export ACR_TOKEN=$(az acr login --name ${ACR_LOGIN_SERVER%%.*} --expose-token --output tsv --query accessToken)
+    - echo "$ACR_TOKEN" | helm registry login $ACR_LOGIN_SERVER --username 00000000-0000-0000-0000-000000000000 --password-stdin
+    - helm push $CHART_PACKAGE $HELM_REGISTRY
+    - echo "Chart pushed successfully to $HELM_REGISTRY"
+  only:
+    - main
+    - master

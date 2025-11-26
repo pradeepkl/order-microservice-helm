@@ -1,0 +1,129 @@
+# .github/workflows/helm-chart.yml
+# -----------------------------------------------------
+# GitHub Actions → Package & Push Helm Chart to AWS ECR (OIDC)
+# -----------------------------------------------------
+
+name: Helm Chart CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  AWS_REGION: ap-south-1  # Change to your AWS region
+  HELM_VERSION: 3.14.0
+  HELM_CHART_NAME: order-microservice  # Change to your chart name
+
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # -----------------------------------------------------
+  # Lint Helm Chart
+  # -----------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine/helm:3.14.0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run helm lint
+        run: |
+          echo "Running helm lint..."
+          helm lint .
+
+  # -----------------------------------------------------
+  # Build Helm Chart
+  # -----------------------------------------------------
+  build-helm:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine/helm:3.14.0
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Package Helm chart
+        run: |
+          echo "Packaging Helm chart..."
+          CHART_VERSION="0.1.${{ github.run_number }}"
+          APP_VERSION="${{ github.sha }}"
+          APP_VERSION="${APP_VERSION:0:7}"
+          
+          helm package . --version ${CHART_VERSION} --app-version ${APP_VERSION}
+          ls -lh *.tgz
+
+      - name: Upload Helm chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: "*.tgz"
+          retention-days: 1
+
+  # -----------------------------------------------------
+  # Push Helm Chart to AWS ECR (via OIDC)
+  # -----------------------------------------------------
+  push-helm:
+    runs-on: ubuntu-latest
+    needs: build-helm
+    steps:
+      - name: Download Helm chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+
+      - name: Install Helm
+        run: |
+          echo "Installing Helm ${HELM_VERSION}..."
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash -s -- --version v${HELM_VERSION}
+          helm version
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push Helm chart to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "Pushing Helm chart to ECR..."
+          ls -lh *.tgz
+          
+          # Get the chart package name
+          CHART_PACKAGE=$(ls *.tgz)
+          echo "Chart package: $CHART_PACKAGE"
+          
+          # Push to ECR
+          helm push $CHART_PACKAGE oci://${ECR_REGISTRY}/helm
+          
+          echo "Chart pushed successfully to oci://${ECR_REGISTRY}/helm"
+
+      - name: Output chart details
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          CHART_PACKAGE=$(ls *.tgz)
+          CHART_NAME=$(echo $CHART_PACKAGE | sed 's/-.*//')
+          CHART_VERSION=$(echo $CHART_PACKAGE | sed 's/.*-//' | sed 's/.tgz//')
+          
+          echo "=========================================="
+          echo "Chart successfully pushed!"
+          echo "Registry: ${ECR_REGISTRY}"
+          echo "Chart: ${CHART_NAME}"
+          echo "Version: ${CHART_VERSION}"
+          echo "Pull command:"
+          echo "  helm pull oci://${ECR_REGISTRY}/helm/${CHART_NAME} --version ${CHART_VERSION}"
+          echo "=========================================="

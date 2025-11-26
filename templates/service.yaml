@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "orders.fullname" . }}-svc
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "orders.fullname" . }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP

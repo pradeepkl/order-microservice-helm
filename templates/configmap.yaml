@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "orders.fullname" . }}-cm
+data:
+{{- if .Values.config.profiles.dev.enabled }}
+  {{ .Values.config.profiles.dev.name }}: |-
+{{ tpl .Values.config.profiles.dev.content . | indent 4 }}
+{{- end }}
+{{- if .Values.config.profiles.qa.enabled }}
+  {{ .Values.config.profiles.qa.name }}: |-
+{{ tpl .Values.config.profiles.qa.content . | indent 4 }}
+{{- end }}

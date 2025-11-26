@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "orders.fullname" . }}
+  annotations:
+    kubernetes.io/change-cause: "Helm release {{ .Release.Revision }}"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "orders.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "orders.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "orders.fullname" . }}-sa
+      containers:
+        - name: order-microservice
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.env.SPRING_PROFILES_ACTIVE | quote }}
+            - name: SERVER_PORT
+              value: {{ .Values.env.SERVER_PORT | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.env.SPRING_DATASOURCE_URL | quote }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.db.name }}
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.db.name }}
+                  key: password
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config
+      volumes:
+        - name: app-config
+          configMap:
+            name: {{ include "orders.fullname" . }}-cm
