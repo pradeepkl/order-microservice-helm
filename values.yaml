@@ -29,7 +29,7 @@ config:
       name: application-dev.yaml
       content: |-
         app:
-          orderCount: 10
+          orderCount: 15
         server:
           port: 8222
         spring:
